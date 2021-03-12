@@ -4,6 +4,8 @@ This package provides all you need to compile and easily execute a Keylogger dae
 
 To run this service you need superuser privileges as they are required to read from `/dev/input/eventX`. You also need such priviledges in order to read, update, move or delete the file `keyboard.log` so as not to allow any unpriviledged user to access sensible information.
 
+We want to point out that the daemon is currently designed to work with the IT keyboard layout and if you are intended to use a differen one (*e.g.*, EN, US, DE, etc.) you have to make some changes into `src/keylogger.h`.
+
 ## Compilation
 
 Before compile source code you must identify which is the number `X` of the input event `eventX` associated with the used keyboard. To do this it is sufficient to launch `cat /proc/bus/input/devices` and find the device name corresponding to the wanted keyboard. Once found the relative entry, `eventX` can be read from the list of Handlers.
