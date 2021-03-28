@@ -6,7 +6,7 @@ all: keylogger
 
 keylogger: keylogger.o
 	gcc -o keylogger keylogger.o
-	chmod 544 keylogger
+	chmod 755 keylogger
 	mkdir -p bin/
 	mv keylogger.o bin/
 	mv keylogger bin/
